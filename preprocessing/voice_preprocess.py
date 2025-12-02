@@ -6,7 +6,7 @@ import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 sr_target = 16000  # target sampling rate
-n_mfcc = 13  # number of MFCC features
+n_mfcc = 8  # number of MFCC features
 
 def is_valid_audio(file_path, sr=sr_target):
     """Check if an audio file is loadable and finite."""
