@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, classification_report
@@ -48,6 +48,15 @@ if USE_PCA:
     print(f"\nPCA applied. New shape: {X_train_scaled.shape}")
 else:
     pca = None
+
+#5-fold cross validation
+print("Running 5-fold cross validation...")
+svm_cv = SVC(kernel="rbf", C=10, gamma="scale")
+cv_scores = cross_val_score(svm_cv, X_train_scaled, y_train, cv=5)
+
+print(f"Cross-Validation Accuracies: {cv_scores}")
+print(f"Mean CV Accuracy: {cv_scores.mean():.4f}")
+print(f"Standard Deviation: {cv_scores.std():.4f}")
 
 # Apply SMOTE only to train for balancing the dataset
 print("\nApplying SMOTE...")
