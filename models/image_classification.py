@@ -34,23 +34,21 @@ X_val, X_test, y_val, y_test = train_test_split(
 )
 
 # 5-Fold Cross Validation
-print("\nRunning 5-Fold Cross Validation...")
+#print("\nRunning 5-Fold Cross Validation...")
 
-rf_cv = RandomForestClassifier(n_estimators=200, random_state=42)
+#rf_cv = RandomForestClassifier(n_estimators=200, random_state=42)
 
-cv_scores = cross_val_score(rf_cv, X, y, cv=5)
+#cv_scores = cross_val_score(rf_cv, X, y, cv=5)
 
-print(f"Cross-Validation Accuracies: {cv_scores}")
-print(f"Mean CV Accuracy: {cv_scores.mean():.4f}")
-print(f"Std Dev: {cv_scores.std():.4f}")
+#print(f"Cross-Validation Accuracies: {cv_scores}")
+#print(f"Mean CV Accuracy: {cv_scores.mean():.4f}")
+#print(f"Std Dev: {cv_scores.std():.4f}")
 
 # Train Random Forest
 model = RandomForestClassifier(n_estimators=200, random_state=42)
 model.fit(X_train, y_train)
 
-# -------------------------
 # Evaluate model
-# -------------------------
 preds = model.predict(X_test)
 
 print("\nImage Classification Accuracy:", accuracy_score(y_test, preds))
@@ -61,14 +59,12 @@ print(classification_report(y_test, preds, target_names=class_names))
 print("\nConfusion Matrix:\n")
 cm = confusion_matrix(y_test, preds)
 
-# Pretty print confusion matrix with labels
+#print confusion matrix with labels
 print(f"{'':15}{class_names}")
 for i, row in enumerate(cm):
     print(f"{class_names[i]:15}{row}")
 
-# -------------------------
 # Save model
-# -------------------------
 os.makedirs(save_model_path, exist_ok=True)
 model_path = os.path.join(save_model_path, "rf_image_classifier.pkl")
 joblib.dump(model, model_path)
