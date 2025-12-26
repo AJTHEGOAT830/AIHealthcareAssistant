@@ -68,5 +68,7 @@ for i, row in enumerate(cm):
 os.makedirs(save_model_path, exist_ok=True)
 model_path = os.path.join(save_model_path, "rf_image_classifier.pkl")
 joblib.dump(model, model_path)
+np.save(os.path.join(save_model_path, "class_names.npy"), class_names)
+print("Class names saved.")
 
 print(f"\nRandom Forest image model saved to: {model_path}")
