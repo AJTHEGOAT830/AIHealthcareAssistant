@@ -39,7 +39,7 @@ def chatbot_reply(user_msg: str) -> str:
 
     msg = user_msg.lower()
 
-    # URGENT / RED-FLAG SYMPTOMS
+    # Urgent Symptoms
     urgent_signs = [
         "chest pain", "severe chest", "crushing chest",
         "shortness of breath", "can't breathe", "hard to breathe",
@@ -58,7 +58,7 @@ def chatbot_reply(user_msg: str) -> str:
             "or contact emergency services now. If you are unsure, it is better to be cautious."
         )
 
-    # RESPIRATORY
+    # Respiratory Symptoms
     if "cough" in msg or "breath" in msg or "wheezing" in msg:
         return (
             "Cough and breathing symptoms may come from infections, allergies, or irritation. "
@@ -68,7 +68,7 @@ def chatbot_reply(user_msg: str) -> str:
             "but it is not diagnostic."
         )
 
-    # FEVER / INFECTION
+    # Fever/infection symptoms
     if "fever" in msg or "temperature" in msg or "flu" in msg:
         return (
             "Fever is often related to infection. Rest, fluids, and monitoring usually help. "
@@ -76,7 +76,7 @@ def chatbot_reply(user_msg: str) -> str:
             "or is accompanied by confusion, severe weakness, or chest pain."
         )
 
-    # SKIN / RASH
+    # Skin/Rash symptoms
     if "rash" in msg or "skin" in msg or "spots" in msg:
         return (
             "Rashes may be due to irritation, infection, or allergies. "
@@ -85,7 +85,7 @@ def chatbot_reply(user_msg: str) -> str:
             "but it does not replace medical evaluation."
         )
 
-    # PAIN
+    # If Pain in user imput
     if "pain" in msg or "ache" in msg or "hurts" in msg:
         return (
             "Pain varies widely in cause. Resting and staying hydrated may help. "
@@ -93,7 +93,7 @@ def chatbot_reply(user_msg: str) -> str:
             "or linked to injury, fever, numbness, or weakness."
         )
 
-    # MEDICATION QUESTIONS
+    # If medication in response
     if "medicine" in msg or "medication" in msg or "take" in msg:
         return (
             "I cannot provide medication dosing or prescribing guidance. "
@@ -101,45 +101,40 @@ def chatbot_reply(user_msg: str) -> str:
             "A clinician or pharmacist is best placed to advise."
         )
 
-    # DEFAULT
+    # default response
     return (
         "I can provide general health guidance, but I cannot diagnose conditions. "
         "You can also upload an image or record your voice for additional analysis. "
         "Tell me more about what you are experiencing."
     )
 
-
-# Voice feature extraction
 def extract_voice_features(path):
     try:
-        y, _ = librosa.load(path, sr=sr_target)
-
-        if y.size == 0 or np.max(np.abs(y)) == 0:
-            raise ValueError("Silent or empty audio")
-
+        # Load and Standardize
+        y, _ = librosa.load(path, sr=16000)
+        if y.size == 0: return None
         y = y / (np.max(np.abs(y)) + 1e-6)
 
-        mfcc = librosa.feature.mfcc(y=y, sr=sr_target, n_mfcc=n_mfcc)
+        # Extracting 13 MFCCs
+        mfcc = librosa.feature.mfcc(y=y, sr=16000, n_mfcc=13)
         mfcc_mean = np.mean(mfcc.T, axis=0)
 
+        # Extracting Jitter, Shimmer, and HNR
         sound = parselmouth.Sound(path)
         pitch = sound.to_pitch()
         pulses = parselmouth.praat.call([sound, pitch], "To PointProcess (cc)")
 
-        f0_mean = parselmouth.praat.call(pitch, "Get mean", 0, 0, "Hertz")
-        f0_std = parselmouth.praat.call(pitch, "Get standard deviation", 0, 0, "Hertz")
-        jitter = parselmouth.praat.call(
-            pulses, "Get jitter (ddp)", 0, 0, 0.0001, 0.02, 1.3
-        )
-        shimmer = parselmouth.praat.call(
-            [sound, pulses], "Get shimmer (apq3)", 0, 0, 0.0001, 0.02, 1.3, 1.6
-        )
+        jitter = parselmouth.praat.call(pulses, "Get jitter (ddp)", 0, 0, 0.0001, 0.02, 1.3)
+        shimmer = parselmouth.praat.call([sound, pulses], "Get shimmer (apq3)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
 
-        extra = np.array([f0_mean, f0_std, jitter, shimmer])
+        harmonicity = sound.to_harmonicity()
+        hnr = parselmouth.praat.call(harmonicity, "Get mean", 0, 0)
+
+        # Combining to match the 16 features the model expects
+        extra = np.array([jitter, shimmer, hnr])
         return np.concatenate([mfcc_mean, extra])
-
     except Exception as e:
-        logging.error(f"Voice feature extraction failed: {e}")
+        print(f"Extraction Error: {e}")
         return None
 
 # /voice-analysis
@@ -155,8 +150,9 @@ def voice_analysis():
     try:
         raw_audio.save(temp_input)
 
-        # Convert anything → WAV
-        AudioSegment.from_file(temp_input).export(temp_wav, format="wav")
+        # Converting anything to WAV
+        # Forcing parameters during export to match training data
+        AudioSegment.from_file(temp_input).set_frame_rate(16000).set_channels(1).export(temp_wav, format="wav")
 
         feat = extract_voice_features(temp_wav)
         if feat is None:
@@ -170,7 +166,7 @@ def voice_analysis():
         reduced = VOICE_PCA.transform(scaled)
         pred = VOICE_MODEL.predict(reduced)[0]
 
-        label = "Healthy Voice" if pred == 1 else "Possible Vocal Anomaly"
+        label = "Clear Vocal Profile: Your vocal patterns appear steady and clear." if pred == 1 else "Possible Vocal Anomaly: We noticed some minor vocal irregularities. This is common with fatigue or illness symptoms."
 
         return jsonify({
             "result": label,
