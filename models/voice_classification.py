@@ -1,91 +1,52 @@
 import os
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score
+import joblib
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.decomposition import PCA
-from imblearn.over_sampling import SMOTE
-import joblib
 
-# Load preprocessed features
+# Loading the SVD features
 processed_dir = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\data\voice\processed_features"
+X = np.load(os.path.join(processed_dir, "svd_features.npy"))
+y = np.load(os.path.join(processed_dir, "svd_labels.npy"))
 
-print("Loading feature dataset...")
-X = np.load(os.path.join(processed_dir, "coswara_features.npy"))
-y = np.load(os.path.join(processed_dir, "coswara_labels.npy"))
+print(f"Data Loaded: {X.shape[0]} samples, {X.shape[1]} features")
 
-print("Shape:", X.shape, y.shape)
-
-# Train/Val/Test Split (70/15/15)
-X_train, X_temp, y_train, y_temp = train_test_split(
-    X, y, test_size=0.30, random_state=42, stratify=y
-)
-X_val, X_test, y_val, y_test = train_test_split(
-    X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
+# Split (80% Train, 20% Test)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, random_state=42, stratify=y
 )
 
-print(f"\nData split:")
-print(f"Train: {len(X_train)}")
-print(f"Val:   {len(X_val)}")
-print(f"Test:  {len(X_test)}")
-
-
+# Scaling
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
-X_val_scaled = scaler.transform(X_val)
 X_test_scaled = scaler.transform(X_test)
 
-USE_PCA = True
+# PCA
+pca = PCA(n_components=0.95)
+X_train_pca = pca.fit_transform(X_train_scaled)
+X_test_pca = pca.transform(X_test_scaled)
+print(f"PCA reduced features to: {X_train_pca.shape[1]}")
 
-if USE_PCA:
-    pca = PCA(n_components=0.95)  # keep 95% variance
-    X_train_scaled = pca.fit_transform(X_train_scaled)
-    X_val_scaled = pca.transform(X_val_scaled)
-    X_test_scaled = pca.transform(X_test_scaled)
+# Training SVM with optimised parameters
+model = SVC(kernel='rbf', C=1.0, gamma='scale', probability=True)
+model.fit(X_train_pca, y_train)
 
-    print(f"\nPCA applied. New shape: {X_train_scaled.shape}")
-else:
-    pca = None
-
-#5-fold cross validation
-print("Running 5-fold cross validation...")
-svm_cv = SVC(kernel="rbf", C=10, gamma="scale")
-cv_scores = cross_val_score(svm_cv, X_train_scaled, y_train, cv=5)
-
-print(f"Cross-Validation Accuracies: {cv_scores}")
-print(f"Mean CV Accuracy: {cv_scores.mean():.4f}")
-print(f"Standard Deviation: {cv_scores.std():.4f}")
-
-# Apply SMOTE only to train for balancing the dataset
-print("\nApplying SMOTE...")
-smote = SMOTE(random_state=42)
-X_train_bal, y_train_bal = smote.fit_resample(X_train_scaled, y_train)
-
-print("Balanced training shape:", X_train_bal.shape, y_train_bal.shape)
-
-
-# Training SVM
-print("\nTraining SVM with RBF kernel...")
-svm_model = SVC(kernel="rbf", C=10, gamma="scale", probability=True)
-svm_model.fit(X_train_bal, y_train_bal)
-
-# Evaluation on the test set
-y_pred = svm_model.predict(X_test_scaled)
-
-print("\nFINAL TEST ACCURACY:", accuracy_score(y_test, y_pred))
-print("\nClassification Report:\n")
+# Evaluation
+y_pred = model.predict(X_test_pca)
+print("\n--- RESULTS ---")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print("\nClassification Report:")
 print(classification_report(y_test, y_pred, target_names=["Anomaly", "Healthy"]))
 
-
-# Saving the model + scaler + PCA
+# Save models for the Flask API
 save_path = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
 os.makedirs(save_path, exist_ok=True)
 
-joblib.dump(svm_model, os.path.join(save_path, "svm_voice_classifier.pkl"))
+joblib.dump(model, os.path.join(save_path, "svm_voice_classifier.pkl"))
 joblib.dump(scaler, os.path.join(save_path, "voice_scaler.pkl"))
+joblib.dump(pca, os.path.join(save_path, "voice_pca.pkl"))
 
-if pca:
-    joblib.dump(pca, os.path.join(save_path, "voice_pca.pkl"))
-
-print("\nModel, scaler, and PCA saved successfully!")
+print(f"\nModel and Scaler saved to {save_path}")
