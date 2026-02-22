@@ -17,12 +17,13 @@ logging.basicConfig(level=logging.ERROR)
 app = Flask(__name__)
 
 MODEL_DIR = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
+#VOICE_MODEL = joblib.load(os.path.join(MODEL_DIR, "svm_voice_classifier.pkl"))
+#VOICE_SCALER = joblib.load(os.path.join(MODEL_DIR, "voice_scaler.pkl"))
+#VOICE_PCA = joblib.load(os.path.join(MODEL_DIR, "voice_pca.pkl"))
+#IMAGE_MODEL = joblib.load(os.path.join(MODEL_DIR, "rf_image_classifier.pkl"))
 
-VOICE_MODEL = joblib.load(os.path.join(MODEL_DIR, "svm_voice_classifier.pkl"))
-VOICE_SCALER = joblib.load(os.path.join(MODEL_DIR, "voice_scaler.pkl"))
-VOICE_PCA = joblib.load(os.path.join(MODEL_DIR, "voice_pca.pkl"))
-
-IMAGE_MODEL = joblib.load(os.path.join(MODEL_DIR, "rf_image_classifier.pkl"))
+VOICE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "voice_full_pipeline.pkl"))
+IMAGE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "rf_image_pipeline.pkl"))
 CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names.npy"), allow_pickle=True)
 
 sr_target = 16000
@@ -130,7 +131,7 @@ def extract_voice_features(path):
         harmonicity = sound.to_harmonicity()
         hnr = parselmouth.praat.call(harmonicity, "Get mean", 0, 0)
 
-        # Combining to match the 16 features the model expects
+        # Combining to match the 16 features for the model
         extra = np.array([jitter, shimmer, hnr])
         return np.concatenate([mfcc_mean, extra])
     except Exception as e:
@@ -149,29 +150,14 @@ def voice_analysis():
 
     try:
         raw_audio.save(temp_input)
-
-        # Converting anything to WAV
-        # Forcing parameters during export to match training data
         AudioSegment.from_file(temp_input).set_frame_rate(16000).set_channels(1).export(temp_wav, format="wav")
-
         feat = extract_voice_features(temp_wav)
         if feat is None:
-            return jsonify({
-                "result": "Could not analyse voice",
-                "disclaimer": "This is not a medical diagnosis."
-            })
-
-        feat = feat.reshape(1, -1)
-        scaled = VOICE_SCALER.transform(feat)
-        reduced = VOICE_PCA.transform(scaled)
-        pred = VOICE_MODEL.predict(reduced)[0]
-
-        label = "Clear Vocal Profile: Your vocal patterns appear steady and clear." if pred == 1 else "Possible Vocal Anomaly: We noticed some minor vocal irregularities. This is common with fatigue or illness symptoms."
-
-        return jsonify({
-            "result": label,
-            "disclaimer": "This is not a medical diagnosis."
-        })
+            return jsonify({"result": "Could not analyse voice", "disclaimer": "This is not a medical diagnosis."})
+        # Pipeline handles Scaler & PCA automatically
+        pred = VOICE_PIPELINE.predict(feat.reshape(1, -1))[0]
+        label = "Clear Vocal Profile: Your vocal patterns appear steady and clear." if pred == 1 else "Possible Vocal Anomaly: We noticed some minor vocal irregularities."
+        return jsonify({"result": label, "disclaimer": "This is not a medical diagnosis."})
 
     finally:
         for p in [temp_input, temp_wav]:
@@ -189,22 +175,20 @@ def image_analysis():
 
     try:
         img_file.save(img_path)
-
         img = cv2.imread(img_path)
-        if img is None:
-            return jsonify({"error": "Invalid image uploaded"}), 400
+        if img is None: return jsonify({"error": "Invalid image"}), 400
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (224, 224))
-        img_flat = img.reshape(1, -1)
 
-        pred = IMAGE_MODEL.predict(img_flat)[0]
+        # IMPORTANT: Resize to 64x64 to match your new memory-efficient model
+        img = cv2.resize(img, (64, 64))
+        img_flat = img.flatten().reshape(1, -1)
+
+        # PREDICTION: Pipeline handles Scaler & PCA automatically!
+        pred = IMAGE_PIPELINE.predict(img_flat)[0]
         label = str(CLASS_NAMES[pred])
 
-        return jsonify({
-            "result": label,
-            "disclaimer": "This is not a medical diagnosis."
-        })
+        return jsonify({"result": label, "disclaimer": "This is not a medical diagnosis."})
 
     finally:
         if os.path.exists(img_path):
@@ -232,54 +216,45 @@ def multimodal():
 
     responses = []
 
-    # Image
     if image:
         img_path = f"temp_{uuid.uuid4().hex}.jpg"
         try:
             image.save(img_path)
-
             img = cv2.imread(img_path)
             if img is not None:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img = cv2.resize(img, (224, 224))
-                img_flat = img.reshape(1, -1)
-
-                pred = IMAGE_MODEL.predict(img_flat)[0]
+                img = cv2.resize(img, (64, 64))
+                img_flat = img.flatten().reshape(1, -1)
+                pred = IMAGE_PIPELINE.predict(img_flat)[0]
                 responses.append(f"Image suggests: {CLASS_NAMES[pred]}")
         finally:
             if os.path.exists(img_path):
                 os.remove(img_path)
 
-    # Audio
     if audio:
         audio_path = f"temp_{uuid.uuid4().hex}.wav"
         try:
             audio.save(audio_path)
-
             feat = extract_voice_features(audio_path)
             if feat is not None:
-                feat = feat.reshape(1, -1)
-                scaled = VOICE_SCALER.transform(feat)
-                reduced = VOICE_PCA.transform(scaled)
-                pred = VOICE_MODEL.predict(reduced)[0]
+                # Pipeline handles Scaling and PCA internally
+                pred = VOICE_PIPELINE.predict(feat.reshape(1, -1))[0]
 
                 responses.append(
-                    "Voice suggests healthy"
+                    "Voice profile appears healthy"
                     if pred == 1
-                    else "Voice suggests possible anomaly"
+                    else "Voice analysis suggests a possible anomaly"
                 )
         finally:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
 
-    # Chatbot
     responses.append(chatbot_reply(text))
 
     return jsonify({
-        "response": " ".join(responses),
+        "response": " | ".join(responses),
         "disclaimer": "This system provides non-diagnostic guidance only."
     })
-
 
 # Run server
 if __name__ == "__main__":
