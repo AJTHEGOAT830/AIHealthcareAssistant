@@ -47,7 +47,7 @@ def process_svd_kaggle(base_dir):
     """Processes the Normal, Laryngozele, and Vox senilis folders."""
     features, labels = [], []
 
-    # Mapping: Normal -> 1 (Healthy), Others -> 0 (Anomaly)
+    #Normal = 1Healthy, Others -> 0 (Anomaly)
     categories = {
         "Normal": 1,
         "Laryngozele": 0,

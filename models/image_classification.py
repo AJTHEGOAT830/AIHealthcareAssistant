@@ -1,74 +1,83 @@
 import os
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import joblib
+import cv2
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, log_loss
+from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
+# Paths
 processed_dir = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\data\images\Dermnet\processed"
 dataset_dir = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\data\images\Dermnet\dataset_merged\train"
 save_model_path = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
 
-# Load feature data
-train_images = np.load(os.path.join(processed_dir, "train_images.npy"))
-train_labels = np.load(os.path.join(processed_dir, "train_labels.npy"))
+# Loading and Resizing
+print("Loading data...")
+raw_images = np.load(os.path.join(processed_dir, "train_images.npy"))
+y = np.load(os.path.join(processed_dir, "train_labels.npy"))
 
-# Autoload class names
-class_names = sorted([
-    d for d in os.listdir(dataset_dir)
-    if os.path.isdir(os.path.join(dataset_dir, d))
+print("Resizing images to 64x64 to prevent Memory Errors...")
+X_resized = []
+for img in raw_images:
+    # Shrinking from 224x224 to 64x64 to reduce memory usage
+    res = cv2.resize(img, (64, 64))
+    X_resized.append(res.flatten())
+
+X = np.array(X_resized, dtype='float32')
+del raw_images # Free up RAM immediately
+
+class_names = sorted([d for d in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, d))])
+
+# Split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y)
+
+# Pipeline
+img_pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('pca', PCA(n_components=50)), # Using 50 components for speed/stability
+    ('rf', RandomForestClassifier(random_state=42))
 ])
 
-print("Detected class names:", class_names)
+# Hyperparameter Tuning
+param_grid = {
+    'rf__n_estimators': [100, 200],
+    'rf__max_depth': [10, 20, None],
+    'rf__min_samples_split': [2, 5]
+}
 
-# Flatten images for Random Forest
-X = train_images.reshape(len(train_images), -1)
-y = train_labels
+print("Starting Hyperparameter Tuning (5-Fold CV)...")
+grid_search = GridSearchCV(img_pipeline, param_grid, cv=5, scoring='accuracy', n_jobs=-1, verbose=2)
+grid_search.fit(X_train, y_train)
 
-# Train/test split
-X_train, X_temp, y_train, y_temp = train_test_split(
-    X, y, test_size=0.30, random_state=42, stratify=y
-)
-X_val, X_test, y_val, y_test = train_test_split(
-    X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
-)
+best_model = grid_search.best_estimator_
 
-# 5-Fold Cross Validation
-#print("\nRunning 5-Fold Cross Validation...")
+#Extracting CV Metrics
+best_idx = grid_search.best_index_
+cv_mean = grid_search.cv_results_['mean_test_score'][best_idx]
+cv_std = grid_search.cv_results_['std_test_score'][best_idx]
 
-#rf_cv = RandomForestClassifier(n_estimators=200, random_state=42)
+#Evaluation and Loss Function
+y_pred = best_model.predict(X_test)
+y_probs = best_model.predict_proba(X_test)
 
-#cv_scores = cross_val_score(rf_cv, X, y, cv=5)
+# Calculate Log-Loss
+loss_value = log_loss(y_test, y_probs)
 
-#print(f"Cross-Validation Accuracies: {cv_scores}")
-#print(f"Mean CV Accuracy: {cv_scores.mean():.4f}")
-#print(f"Std Dev: {cv_scores.std():.4f}")
+print(f"\nBest Parameters: {grid_search.best_params_}")
+print(f"Mean CV Accuracy: {cv_mean:.4f}")
+print(f"CV Standard Deviation (SD): {cv_std:.4f}")
+print(f"Final Test Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print(f"Log-Loss (Error): {loss_value:.4f}")
 
-# Train Random Forest
-model = RandomForestClassifier(n_estimators=200, random_state=42)
-model.fit(X_train, y_train)
+print("\nFull Classification Report (Recall/F1/Precision):")
+print(classification_report(y_test, y_pred, target_names=class_names))
 
-# Evaluate model
-preds = model.predict(X_test)
-
-print("\nImage Classification Accuracy:", accuracy_score(y_test, preds))
-
-print("\nClassification Report:\n")
-print(classification_report(y_test, preds, target_names=class_names))
-
-print("\nConfusion Matrix:\n")
-cm = confusion_matrix(y_test, preds)
-
-#print confusion matrix with labels
-print(f"{'':15}{class_names}")
-for i, row in enumerate(cm):
-    print(f"{class_names[i]:15}{row}")
-
-# Save model
+# Saving
 os.makedirs(save_model_path, exist_ok=True)
-model_path = os.path.join(save_model_path, "rf_image_classifier.pkl")
-joblib.dump(model, model_path)
+joblib.dump(best_model, os.path.join(save_model_path, "rf_image_pipeline.pkl"))
 np.save(os.path.join(save_model_path, "class_names.npy"), class_names)
-print("Class names saved.")
+print("\nOptimized Pipeline saved successfully.")
 
-print(f"\nRandom Forest image model saved to: {model_path}")
