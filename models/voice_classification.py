@@ -73,37 +73,3 @@ os.makedirs(save_path, exist_ok=True)
 
 joblib.dump(best_model, os.path.join(save_path, "voice_full_pipeline.pkl"))
 print(f"\nOptimized Pipeline saved to {save_path}")
-
-
-
-# # Scaling
-# scaler = StandardScaler()
-# X_train_scaled = scaler.fit_transform(X_train)
-# X_test_scaled = scaler.transform(X_test)
-#
-# # PCA
-# pca = PCA(n_components=0.95)
-# X_train_pca = pca.fit_transform(X_train_scaled)
-# X_test_pca = pca.transform(X_test_scaled)
-# print(f"PCA reduced features to: {X_train_pca.shape[1]}")
-#
-# # Training SVM with optimised parameters
-# model = SVC(kernel='rbf', C=1.0, gamma='scale', probability=True)
-# model.fit(X_train_pca, y_train)
-#
-# # Evaluation
-# y_pred = model.predict(X_test_pca)
-# print("\n--- RESULTS ---")
-# print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
-# print("\nClassification Report:")
-# print(classification_report(y_test, y_pred, target_names=["Anomaly", "Healthy"]))
-#
-# # Save models for the Flask API
-# save_path = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
-# os.makedirs(save_path, exist_ok=True)
-#
-# joblib.dump(model, os.path.join(save_path, "svm_voice_classifier.pkl"))
-# joblib.dump(scaler, os.path.join(save_path, "voice_scaler.pkl"))
-# joblib.dump(pca, os.path.join(save_path, "voice_pca.pkl"))
-#
-# print(f"\nModel and Scaler saved to {save_path}")
