@@ -8,13 +8,32 @@ import os
 import uuid
 import logging
 from pydub import AudioSegment
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin, LoginManager, login_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 
+app = Flask(__name__)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(120), nullable=False)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
 # Logging
 logging.basicConfig(level=logging.ERROR)
 
 # App init
-app = Flask(__name__)
+#app = Flask(__name__)
 
 MODEL_DIR = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
 #VOICE_MODEL = joblib.load(os.path.join(MODEL_DIR, "svm_voice_classifier.pkl"))
@@ -28,6 +47,56 @@ CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names.npy"), allow_pickle=T
 
 sr_target = 16000
 n_mfcc = 13
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    # Hash password for GDPR compliance
+    hashed_pw = generate_password_hash(data['password'], method='pbkdf2:sha256')
+    new_user = User(username=data['username'], password_hash=hashed_pw)
+    try:
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"message": "User registered successfully"}), 201
+    except:
+        return jsonify({"error": "Username already exists"}), 400
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(username=data['username']).first()
+    if user and check_password_hash(user.password_hash, data['password']):
+        login_user(user)
+        return {"message": "Logged in successfully", "user_id": user.id}, 200
+    return {"error": "Invalid username or password"}, 401
+
+class ChatMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    is_bot = db.Column(db.Boolean, default=False)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+class ScanResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    modality = db.Column(db.String(20), nullable=False) # 'voice' or 'image'
+    result_label = db.Column(db.String(100), nullable=False)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+with app.app_context():
+    db.create_all()
+
+
+@app.route('/get-history', methods=['GET'])
+def get_history():
+    user_id = request.args.get('user_id')
+    scans = ScanResult.query.filter_by(user_id=user_id).order_by(ScanResult.timestamp.desc()).all()
+    chats = ChatMessage.query.filter_by(user_id=user_id).order_by(ChatMessage.timestamp.desc()).all()
+    return jsonify({
+        "scans": [{"modality": s.modality, "label": s.result_label, "time": s.timestamp.isoformat()} for s in scans],
+        "chats": [{"content": c.content, "is_bot": c.is_bot, "time": c.timestamp.isoformat()} for c in chats]
+    })
 
 # Chatbot logic
 def chatbot_reply(user_msg: str) -> str:
@@ -157,6 +226,10 @@ def voice_analysis():
         # Pipeline handles Scaler & PCA automatically
         pred = VOICE_PIPELINE.predict(feat.reshape(1, -1))[0]
         label = "Clear Vocal Profile: Your vocal patterns appear steady and clear." if pred == 1 else "Possible Vocal Anomaly: We noticed some minor vocal irregularities."
+        uid = request.form.get("user_id")
+        if uid:
+            db.session.add(ScanResult(user_id=uid, modality="voice", result_label=label))
+            db.session.commit()
         return jsonify({"result": label, "disclaimer": "This is not a medical diagnosis."})
 
     finally:
@@ -180,13 +253,15 @@ def image_analysis():
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # IMPORTANT: Resize to 64x64 to match your new memory-efficient model
         img = cv2.resize(img, (64, 64))
         img_flat = img.flatten().reshape(1, -1)
 
-        # PREDICTION: Pipeline handles Scaler & PCA automatically!
         pred = IMAGE_PIPELINE.predict(img_flat)[0]
         label = str(CLASS_NAMES[pred])
+        uid = request.form.get("user_id")
+        if uid:
+            db.session.add(ScanResult(user_id=uid, modality="image", result_label=label))
+            db.session.commit()
 
         return jsonify({"result": label, "disclaimer": "This is not a medical diagnosis."})
 
@@ -197,15 +272,19 @@ def image_analysis():
 # /chatbot
 @app.route("/chatbot", methods=["POST"])
 def chatbot():
-    data = request.get_json(silent=True) or {}
-    user_msg = (data.get("message") or "").lower()
+    data = request.get_json()
+    uid = data.get("user_id")
+    msg = data.get("message", "")
+    response = chatbot_reply(msg)
 
-    response = chatbot_reply(user_msg)
-
-    return jsonify({
-        "response": response,
-        "disclaimer": "This is not a medical diagnosis."
-    })
+    if uid:
+        new_msg = ChatMessage(user_id=uid, content=msg, is_bot=False)
+        bot_msg = ChatMessage(user_id=uid, content=response, is_bot=True)
+        db.session.add(ChatMessage(user_id=uid, content=msg, is_bot=False))
+        db.session.add(ChatMessage(user_id=uid, content=response, is_bot=True))
+        db.session.commit()
+        print(f"Saved chat for user {uid}")
+    return jsonify({"response": response})
 
 # /multimodal
 @app.route("/multimodal", methods=["POST"])
@@ -256,6 +335,6 @@ def multimodal():
         "disclaimer": "This system provides non-diagnostic guidance only."
     })
 
-# Run server
+# Runs server
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
