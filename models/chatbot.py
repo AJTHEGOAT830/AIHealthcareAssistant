@@ -8,7 +8,6 @@ def chatbot_reply(user_msg: str) -> str:
 
     msg = user_msg.lower()
 
-    # Red flag / urgent symptoms
     urgent_signs = [
         "chest pain", "severe chest", "crushing chest",
         "shortness of breath", "hard to breathe", "can't breathe",
@@ -20,65 +19,73 @@ def chatbot_reply(user_msg: str) -> str:
         "high fever", "fever 40", "fever 104"
     ]
 
+    categories = {
+        "respiratory": {
+            "keywords": ["cough", "breath", "wheezing"],
+            "response": (
+                "You mentioned cough or breathing symptoms. These can come from infections, "
+                "allergies, or irritation. Stay hydrated and monitor breathing. "
+                "Seek medical advice if symptoms worsen or persist."
+            )
+        },
+        "fever": {
+            "keywords": ["fever", "temperature", "flu"],
+            "response": (
+                "Fever is often linked to infection. Rest and fluids are important. "
+                "Seek medical advice if it lasts more than 3 days or becomes very high."
+            )
+        },
+        "skin": {
+            "keywords": ["rash", "skin", "spots"],
+            "response": (
+                "Skin symptoms like rashes may be due to irritation, allergy, or infection. "
+                "Avoid scratching and monitor for spreading or pain."
+            )
+        },
+        "pain": {
+            "keywords": ["pain", "ache", "hurts"],
+            "response": (
+                "Pain can have many causes. Rest and avoiding strain may help. "
+                "Seek care if it is severe, persistent, or worsening."
+            )
+        },
+        "medication": {
+            "keywords": ["medicine", "medication", "take"],
+            "response": (
+                "Medication advice depends on your medical history. "
+                "A pharmacist or clinician is best placed to guide you safely."
+            )
+        }
+    }
+
+    # Highest priority
     if any(term in msg for term in urgent_signs):
         return (
-            "Some of the symptoms you described may indicate a medical emergency. "
-            "I cannot diagnose conditions, but it would be safest to seek urgent medical attention "
-            "or contact emergency services now. If you are unsure, err on the side of caution."
+            "Some symptoms you mentioned could indicate a medical emergency. "
+            "Please seek urgent medical attention or contact emergency services immediately."
         )
 
-    # Respiratory symptoms
-    if "cough" in msg or "breath" in msg or "wheezing" in msg:
+    # Detecting matching categories
+    matched = []
+
+    for name, data in categories.items():
+        if any(keyword in msg for keyword in data["keywords"]):
+            matched.append(data["response"])
+
+
+    if matched:
         return (
-            "Cough and breathing symptoms can come from infections, allergies, or irritation. "
-            "Monitor your breathing, stay hydrated, and avoid smoke/irritants. "
-            "Seek medical advice if symptoms worsen, last more than a few days, "
-            "or you develop chest pain or fever. "
-            "You may also try the voice tool — it can help flag possible vocal or breathing anomalies, "
-            "but it is not diagnostic."
-        )
-
-    # Fever / infection-like symptoms
-    if "fever" in msg or "temperature" in msg or "flu" in msg:
-        return (
-            "Fever is often the body’s response to infection. Rest, fluids, and monitoring can help. "
-            "Seek medical advice if the fever persists beyond three days, rises very high, "
-            "or if you experience confusion, severe weakness, or persistent chest pain. "
-            "I cannot diagnose illness, but I can help you think about symptoms."
-        )
-
-    # Skin / rash
-    if "rash" in msg or "skin" in msg or "spots" in msg:
-        return (
-            "Skin rashes can have many causes including irritation, infection, and allergies. "
-            "Keep the area clean, avoid scratching, and notice any spreading, fever, or pain. "
-            "You may upload an image for analysis — it may provide supportive insight, "
-            "but it does not replace clinical evaluation."
+            "Based on what you described:\n\n"
+            + "\n\n".join(matched)
+            + "\n\nIf symptoms worsen or you're unsure, seek medical advice. "
+              "I cannot diagnose conditions, but I can help guide you."
         )
 
 
-
-    # Pain
-    if "pain" in msg or "ache" in msg or "hurts" in msg:
-        return (
-            "Pain varies in cause and severity. Gentle rest, hydration, and avoiding strain can help. "
-            "Seek medical review if pain is severe, persistent, worsening, or linked to injury, fever, "
-            "numbness, or weakness. I cannot diagnose conditions, but I can help guide next steps."
-        )
-
-    # Medication or treatment questions
-    if "medicine" in msg or "medication" in msg or "take" in msg:
-        return (
-            "I cannot recommend or dose medications. Medication decisions depend on your history, "
-            "allergies, and other conditions. A pharmacist or clinician is best placed to advise you. "
-            "I can help discuss symptoms if that would be useful."
-        )
-
-    # General fallback
     return (
-        "I can provide general health guidance and help you think about symptoms, "
-        "but I cannot diagnose conditions. You can also try:\n"
-        "- uploading an image for visual analysis,\n"
-        "- recording your voice for vocal pattern analysis.\n"
-        "Let me know what symptoms you are experiencing."
+        "I can provide general health guidance, but I cannot diagnose conditions.\n"
+        "You can also try:\n"
+        "- uploading an image\n"
+        "- recording your voice\n\n"
+        "Tell me more about your symptoms."
     )
