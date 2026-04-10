@@ -14,7 +14,7 @@ from flask_login import UserMixin, LoginManager, login_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-
+app.secret_key = 'super_secret_key_for_distinction_project'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 
 db = SQLAlchemy(app)
@@ -45,6 +45,10 @@ VOICE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "voice_full_pipeline.pkl"))
 IMAGE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "rf_image_pipeline.pkl"))
 CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names.npy"), allow_pickle=True)
 
+#IMAGE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "rf_image_pipeline_4class.pkl"))
+#CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names_4class.npy"), allow_pickle=True)
+print(f"API successfully loaded 3-class model + Heuristic Filters. Classes: {CLASS_NAMES}")
+#print(f"API successfully loaded 4-class model. Classes: {CLASS_NAMES}")
 sr_target = 16000
 n_mfcc = 13
 
@@ -207,6 +211,16 @@ def extract_voice_features(path):
         print(f"Extraction Error: {e}")
         return None
 
+def is_audio_silent(y, threshold=0.01):
+    """
+    Checks if the audio is essentially silent.
+    y: the audio signal
+    threshold: the 'loudness' floor. 0.01 is a good starting point.
+    """
+    rms = np.sqrt(np.mean(y**2))
+    print(f"DEBUG: Audio RMS Energy: {rms:.4f}")
+    return rms < threshold
+
 # /voice-analysis
 @app.route("/voice-analysis", methods=["POST"])
 def voice_analysis():
@@ -220,6 +234,14 @@ def voice_analysis():
     try:
         raw_audio.save(temp_input)
         AudioSegment.from_file(temp_input).set_frame_rate(16000).set_channels(1).export(temp_wav, format="wav")
+        import librosa
+        y, sr = librosa.load(temp_wav, sr=16000)
+
+        if is_audio_silent(y, threshold=0.01):
+            return jsonify({
+                "result": "Recording too quiet to analyze",
+                "disclaimer": "Please ensure you are speaking clearly into the microphone."
+            })
         feat = extract_voice_features(temp_wav)
         if feat is None:
             return jsonify({"result": "Could not analyse voice", "disclaimer": "This is not a medical diagnosis."})
@@ -237,7 +259,60 @@ def voice_analysis():
             if os.path.exists(p):
                 os.remove(p)
 
-# /image-analysis
+
+
+def is_skin_present(image):
+    # Converting to HSV color space
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+    # Defining broad range for human skin tones (Hue 0-20, Sat 20-150, Val 70-255)
+    lower_skin = np.array([0, 20, 40], dtype=np.uint8)
+    upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+
+    # Creating a binary mask (white pixels = skin, black = everything else)
+    mask = cv2.inRange(hsv, lower_skin, upper_skin)
+
+    # Calculating what percentage of the image is 'skin'
+    skin_pixel_count = np.count_nonzero(mask)
+    total_pixels = mask.size
+    skin_percentage = (skin_pixel_count / total_pixels) * 100
+
+    #print(f"DEBUG: Skin detected in {skin_percentage:.2f}% of image.")
+    return skin_percentage > 20  # Threshold 20% of the frame must be skin
+
+
+def contains_redness(image):
+    hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+    # Thresholding
+    # Range 1: deep Red
+    lower_red1, upper_red1 = np.array([0, 70, 80]), np.array([7, 255, 255])
+    # Range 2: Wrapped redd
+    lower_red2, upper_red2 = np.array([170, 70, 80]), np.array([180, 255, 255])
+    # Range 3 True Pink (Vibrant pink, not pale beige)
+    lower_pink, upper_pink = np.array([145, 80, 100]), np.array([165, 255, 255])
+
+    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+    mask_p = cv2.inRange(hsv, lower_pink, upper_pink)
+
+    # Combining all inflammatory masks
+    full_mask = cv2.bitwise_or(mask1, mask2)
+    full_mask = cv2.bitwise_or(full_mask, mask_p)
+
+    # Cleaning digital noise
+    kernel = np.ones((7, 7), np.uint8)
+    full_mask = cv2.morphologyEx(full_mask, cv2.MORPH_OPEN, kernel)
+
+    red_ratio = (np.count_nonzero(full_mask) / full_mask.size) * 100
+    print(f"DEBUG: Erythema Intensity: {red_ratio:.2f}%")
+    print("-" * 30)
+    print(f"REDNESS ANALYSIS:")
+    print(f"Detected Red/Pink: {red_ratio:.4f}%")
+    print("-" * 30)
+
+    return red_ratio > 5
+
 @app.route("/image-analysis", methods=["POST"])
 def image_analysis():
     if "image" not in request.files:
@@ -251,13 +326,33 @@ def image_analysis():
         img = cv2.imread(img_path)
         if img is None: return jsonify({"error": "Invalid image"}), 400
 
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        img = cv2.resize(img, (64, 64))
-        img_flat = img.flatten().reshape(1, -1)
+        if not is_skin_present(img_rgb):
+            return jsonify({
+                "result": "No skin condition/disease detected",
+                "disclaimer": "Please ensure the photo is centered on the affected skin area."
+            })
 
-        pred = IMAGE_PIPELINE.predict(img_flat)[0]
-        label = str(CLASS_NAMES[pred])
+        if not contains_redness(img_rgb):
+            return jsonify({
+                "result": "No skin condition/disease detected",
+                "disclaimer": "No significant inflammatory markers (redness) detected."
+            })
+
+        img_resized = cv2.resize(img_rgb, (64, 64), interpolation=cv2.INTER_AREA)
+        img_flat = img_resized.flatten().reshape(1, -1).astype('float32')
+
+        probs = IMAGE_PIPELINE.predict_proba(img_flat)[0]
+
+        max_prob = np.max(probs)
+        pred_idx = np.argmax(probs)
+
+        label = str(CLASS_NAMES[pred_idx])
+        if label == "Healthy_Control":
+            label = "No skin condition/disease detected"
+
+        print(f"DEBUG: Model predicted {label} with {max_prob:.2f} confidence")
         uid = request.form.get("user_id")
         if uid:
             db.session.add(ScanResult(user_id=uid, modality="image", result_label=label))
