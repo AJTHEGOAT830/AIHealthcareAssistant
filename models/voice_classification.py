@@ -43,7 +43,7 @@ best_model = grid_search.best_estimator_
 results_df = pd.DataFrame(grid_search.cv_results_)
 best_params = grid_search.best_params_
 
-# Performance dahsboard for CM, ROC, F1
+# Performance dashboard for CM, ROC, F1
 print("Generating Performance Summary...")
 y_pred = best_model.predict(X_test)
 y_probs = best_model.predict_proba(X_test)
@@ -78,54 +78,52 @@ c_sub = results_df[(results_df['param_svm__gamma'] == best_params['svm__gamma'])
 plt.subplot(1, 3, 1)
 plt.plot(c_sub['param_svm__C'].astype(float), -c_sub['mean_train_score'], 'g-o', label='Train')
 plt.plot(c_sub['param_svm__C'].astype(float), -c_sub['mean_test_score'], 'r--x', label='Val')
-plt.xscale('log'); plt.title("Loss vs C"); plt.legend()
+plt.xscale('log'); plt.title("Log Loss vs C"); plt.ylabel("Log Loss"); plt.legend()
 
 gamma_sub = results_df[(results_df['param_svm__C'] == best_params['svm__C']) & (results_df['param_svm__kernel'] == best_params['svm__kernel'])]
 plt.subplot(1, 3, 2)
 plt.plot(range(len(gamma_sub)), -gamma_sub['mean_test_score'], 'b-s')
 plt.xticks(range(len(gamma_sub)), gamma_sub['param_svm__gamma'])
-plt.title("Loss vs Gamma")
+plt.title("Log Loss vs Gamma"); plt.ylabel("Log Loss")
 
 kernel_sub = results_df[(results_df['param_svm__C'] == best_params['svm__C']) & (results_df['param_svm__gamma'] == best_params['svm__gamma'])]
 plt.subplot(1, 3, 3)
 plt.bar(kernel_sub['param_svm__kernel'].astype(str), -kernel_sub['mean_test_score'], color=['#3498db', '#e74c3c'])
-plt.title("Kernel Comparison")
+plt.title("Kernel Comparison (Log Loss)")
 
 plt.tight_layout()
 plt.savefig(os.path.join(results_dir, "tuning_curves.png"))
 plt.show()
 
-# SVM Decision Boundary Visualisation
-print("Rendering Decision Boundary...")
-pca_2d = PCA(n_components=2)
-X_2d = pca_2d.fit_transform(StandardScaler().fit_transform(X_train))
-svm_2d = SVC(C=best_params['svm__C'], kernel=best_params['svm__kernel'], gamma=best_params['svm__gamma']).fit(X_2d, y_train)
-
-h = 0.5
-x_min, x_max = X_2d[:, 0].min() - 1, X_2d[:, 0].max() + 1
-y_min, y_max = X_2d[:, 1].min() - 1, X_2d[:, 1].max() + 1
-xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
-Z = svm_2d.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
-
+# Prediction Certainty Visualisation
+print("Rendering Prediction Distributions...")
 plt.figure(figsize=(8, 6))
-plt.contourf(xx, yy, Z, cmap=plt.cm.coolwarm, alpha=0.3)
-plt.scatter(X_2d[:, 0], X_2d[:, 1], c=y_train, cmap=plt.cm.coolwarm, edgecolors='k', s=20)
-plt.title("SVM Decision Boundary")
-plt.savefig(os.path.join(results_dir, "decision_boundary.png"))
+label_map = {0: 'Anomaly', 1: 'Healthy'}
+actual_names = [label_map[label] for label in y_test]
+df_probs = pd.DataFrame({
+    'Probability': y_probs[:, 1],
+    'Actual': actual_names
+})
+sns.kdeplot(data=df_probs, x='Probability', hue='Actual',
+            fill=True, common_norm=False, palette='coolwarm')
+plt.title("Class Probability Density (Model Confidence)")
+plt.xlabel("Probability of Healthy Label (0.0=Anomaly, 1.0=Healthy)")
+plt.ylabel("Density")
+plt.savefig(os.path.join(results_dir, "prediction_certainty.png"))
 plt.show()
 
-# Learning Curve
-print("Generating Learning Curve...")
+# Learning Curve: Log Loss
+print("Generating Log Loss Learning Curve...")
 train_sizes, train_scores, test_scores = learning_curve(
     best_model, X_train, y_train, cv=StratifiedKFold(n_splits=3), n_jobs=-1,
-    train_sizes=np.linspace(0.3, 1.0, 3), scoring='accuracy'
+    train_sizes=np.linspace(0.3, 1.0, 4), scoring='neg_log_loss'
 )
 plt.figure(figsize=(8, 6))
-plt.plot(train_sizes, np.mean(train_scores, axis=1), 'o-', color="r", label="Training score")
-plt.plot(train_sizes, np.mean(test_scores, axis=1), 'o-', color="g", label="Cross-validation score")
-plt.title("Learning Curve")
-plt.xlabel("Samples"); plt.ylabel("Accuracy"); plt.legend(); plt.grid(True)
-plt.savefig(os.path.join(results_dir, "learning_curve.png"))
+plt.plot(train_sizes, -np.mean(train_scores, axis=1), 'o-', color="r", label="Training Loss")
+plt.plot(train_sizes, -np.mean(test_scores, axis=1), 'o-', color="g", label="Validation Loss")
+plt.title("Learning Curve (Log Loss Convergence)")
+plt.xlabel("Samples"); plt.ylabel("Log Loss"); plt.legend(); plt.grid(True)
+plt.savefig(os.path.join(results_dir, "learning_curve_logloss.png"))
 plt.show()
 
 # Model Saving
