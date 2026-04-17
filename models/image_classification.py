@@ -49,8 +49,8 @@ param_grid = {
     'rf__min_samples_leaf': [30, 50]
 }
 
-print(f"\n--- Starting Fast 3-Fold CV Grid Search ---")
-cv_strategy = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+print(f"\n--- Starting Fast 5-Fold CV Grid Search ---")
+cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 grid_search = GridSearchCV(img_pipeline, param_grid, cv=cv_strategy, scoring='neg_log_loss', n_jobs=-1, return_train_score=True)
 grid_search.fit(X_train, y_train)
 
