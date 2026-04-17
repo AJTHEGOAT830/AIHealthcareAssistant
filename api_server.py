@@ -36,19 +36,12 @@ logging.basicConfig(level=logging.ERROR)
 #app = Flask(__name__)
 
 MODEL_DIR = r"C:\Users\jagde\PycharmProjects\AIHealthcareAssistant\models\saved_models"
-#VOICE_MODEL = joblib.load(os.path.join(MODEL_DIR, "svm_voice_classifier.pkl"))
-#VOICE_SCALER = joblib.load(os.path.join(MODEL_DIR, "voice_scaler.pkl"))
-#VOICE_PCA = joblib.load(os.path.join(MODEL_DIR, "voice_pca.pkl"))
-#IMAGE_MODEL = joblib.load(os.path.join(MODEL_DIR, "rf_image_classifier.pkl"))
 
 VOICE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "voice_full_pipeline.pkl"))
 IMAGE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "rf_image_pipeline.pkl"))
 CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names.npy"), allow_pickle=True)
 
-#IMAGE_PIPELINE = joblib.load(os.path.join(MODEL_DIR, "rf_image_pipeline_4class.pkl"))
-#CLASS_NAMES = np.load(os.path.join(MODEL_DIR, "class_names_4class.npy"), allow_pickle=True)
 print(f"API successfully loaded 3-class model + Heuristic Filters. Classes: {CLASS_NAMES}")
-#print(f"API successfully loaded 4-class model. Classes: {CLASS_NAMES}")
 sr_target = 16000
 n_mfcc = 13
 
